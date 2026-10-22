@@ -5,6 +5,7 @@ import { Grid, OrbitControls } from '@react-three/drei';
 import type { Mesh } from 'three';
 import './style.css';
 import { AIR, Build, BlockState, emptyBuild, posKey, setBlock } from './model';
+import { builderProjectData, parseImportedFile, serializeSchematic, SchematicFormat } from './formats';
 
 type Tool = 'place' | 'remove' | 'eyedropper';
 type History = { past: Build[]; present: Build; future: Build[] };
@@ -32,23 +33,6 @@ function copyBuild(build: Build): Build {
       blocks: new Map([...region.blocks].map(([key, block]) => [key, { ...block, properties: { ...block.properties } }])),
     })),
     metadata: { ...build.metadata },
-  };
-}
-
-function toFileData(build: Build) {
-  return {
-    format: 'minecraft-ai-builder',
-    version: 1,
-    name: build.name,
-    dataVersion: build.dataVersion,
-    metadata: build.metadata,
-    regions: build.regions.map((region) => ({
-      name: region.name,
-      origin: region.origin,
-      size: region.size,
-      visible: region.visible,
-      blocks: [...region.blocks.entries()],
-    })),
   };
 }
 
@@ -103,12 +87,23 @@ function BlockCube({
     coordinate[1] - origin[1] + 0.5,
     coordinate[2] - origin[2] - size[2] / 2 + 0.5,
   ];
-  return (
-    <mesh ref={mesh} position={local} onClick={(event) => onAction(event, coordinate)} castShadow receiveShadow>
-      <boxGeometry args={[0.98, 0.98, 0.98]} />
-      <meshStandardMaterial color={color} roughness={state.id === 'minecraft:glass' ? 0.22 : 0.82} transparent={state.id === 'minecraft:glass'} opacity={state.id === 'minecraft:glass' ? 0.58 : 1} />
-    </mesh>
-  );
+  const id=state.id.slice(state.id.indexOf(':')+1),props=state.properties;
+  const transparent=/(?:glass|ice|water|honey|slime)/.test(id);
+  const material=<meshStandardMaterial color={color} roughness={transparent?0.22:0.82} transparent={transparent} opacity={transparent?0.58:1} depthWrite={!transparent} />;
+  const at=(geometry:[number,number,number],position:[number,number,number]=[0,0,0],key='part')=><mesh key={key} ref={key==='main'?mesh:undefined} position={position} onClick={(event)=>onAction(event,coordinate)} castShadow receiveShadow><boxGeometry args={geometry}/>{material}</mesh>;
+  if(id.endsWith('_slab'))return <group position={local}>{at([0.98,0.49,0.98],[0,props.type==='top'?0.75:0.25,0],'slab')}</group>;
+  if(id==='snow') {const h=Math.max(1,Math.min(8,Number(props.layers??1)))/8;return <group position={local}>{at([0.98,h,0.98],[0,h/2-0.5,0],'snow')}</group>;}
+  if(id.endsWith('_carpet'))return <group position={local}>{at([0.98,0.0625,0.98],[0,-0.46875,0],'carpet')}</group>;
+  if(id.endsWith('_stairs')) {
+    const yaw=({south:0,west:Math.PI/2,north:Math.PI,east:-Math.PI/2} as Record<string,number>)[props.facing??'north']??0;
+    const upside=props.half==='top';
+    return <group position={local} rotation={[0,yaw,0]}>{at([0.98,0.49,0.98],[0,upside?0.25:-0.25,0],'stair-base')}{at([0.98,0.49,0.49],[0,upside?-0.25:0.25,-0.245],'stair-step')}</group>;
+  }
+  if(id.endsWith('_door')) {
+    const yaw=({south:0,west:Math.PI/2,north:Math.PI,east:-Math.PI/2} as Record<string,number>)[props.facing??'north']??0;
+    return <group position={local} rotation={[0,yaw+(props.open==='true'?Math.PI/2:0),0]}>{at([0.96,0.98,0.08],[0,0,-0.45],'door')}</group>;
+  }
+  return <mesh ref={mesh} position={local} onClick={(event)=>onAction(event,coordinate)} castShadow receiveShadow><boxGeometry args={[0.98,0.98,0.98]} />{material}</mesh>;
 }
 
 function App() {
@@ -242,20 +237,35 @@ function App() {
     }
   }
 
-  function exportProject() {
-    const blob = new Blob([JSON.stringify(toFileData(build), null, 2)], { type: 'application/json' });
+  function download(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${build.name.replace(/[^a-z0-9-_ ]/gi, '').trim().replace(/\s+/g, '-') || 'build'}.mcbuilder.json`;
+    anchor.download = filename;
     anchor.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function safeName() { return build.name.replace(/[^a-z0-9-_ ]/gi, '').trim().replace(/\s+/g, '-') || 'build'; }
+
+  function exportProject() {
+    const blob = new Blob([JSON.stringify(builderProjectData(build), null, 2)], { type: 'application/json' });
+    download(blob, `${safeName()}.mcbuilder.json`);
+  }
+
+  async function exportMinecraft(format: SchematicFormat) {
+    try {
+      const result = await serializeSchematic(build, format);
+      const label = format === 'schem' ? 'Sponge' : format === 'litematic' ? 'Litematica' : 'Legacy';
+      download(new Blob([Uint8Array.from(result).buffer], { type: 'application/octet-stream' }), `${safeName()}.${format}`);
+      setNotice(`${label} schematic exported.`);
+    } catch(error) { setNotice(error instanceof Error ? error.message : 'Could not export schematic.'); }
   }
 
   async function importProject(file?: File) {
     if (!file) return;
     try {
-      const next = fromFileData(JSON.parse(await file.text()));
+      const next = await parseImportedFile(file, fromFileData);
       setHistory({ past: [], present: next, future: [] });
       setNotice('');
     } catch (error) {
@@ -275,7 +285,10 @@ function App() {
           <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Y)">Redo</button>
           <button onClick={() => fileInput.current?.click()}>Open</button>
           <button onClick={exportProject}>Save JSON</button>
-          <input ref={fileInput} className="file-input" type="file" accept=".json,.mcbuilder.json,application/json" onChange={(event) => void importProject(event.target.files?.[0])} />
+          <button onClick={() => void exportMinecraft('schem')}>Export .schem</button>
+          <button onClick={() => void exportMinecraft('litematic')}>Export .litematic</button>
+          <button onClick={() => void exportMinecraft('schematic')}>Export .schematic</button>
+          <input ref={fileInput} className="file-input" type="file" accept=".json,.mcbuilder.json,.schem,.litematic,.schematic,application/json,application/octet-stream" onChange={(event) => void importProject(event.target.files?.[0])} />
         </nav>
         <div className="project">{build.name.toUpperCase()} <i /></div>
       </header>
@@ -325,7 +338,7 @@ function App() {
         <section><h2>INSPECTOR <span>⌄</span></h2><div className="selected-inspector"><i style={{ background: selected.color }} />{selected.name}<small>{selected.id}</small></div><p className="muted">Click a placed block to remove it or place the selected block beside it.</p></section>
         <section><h2>REGION</h2><p className="muted">Origin&nbsp; 0, 0, 0</p><p className="muted">Size&nbsp;&nbsp;&nbsp; {region.size.join(', ')}</p></section>
         <section className="future"><div className="spark">✳</div><h3>BUILDING OPERATIONS</h3><p>AI-assisted generation is planned for a later phase. Edits here are direct and undoable.</p></section>
-        <section className="format-note"><h2>FORMAT SUPPORT</h2><p>Save and open Minecraft AI Builder JSON projects. Sponge and Litematica schematic formats are not available yet.</p></section>
+        <section className="format-note"><h2>FORMAT SUPPORT</h2><p>Open and export Builder JSON and Sponge .schem, Litematica .litematic, and Alpha-era legacy .schematic NBT files. Legacy conversion covers a documented subset of classic block IDs.</p></section>
       </aside>
       <div className="status"><span>● LOCAL PROJECT</span><span>{tool.toUpperCase()} TOOL</span><span>PHASE 1 DEVELOPMENT</span></div>
       {notice && <div className="notice" role="alert">{notice}<button aria-label="Dismiss message" onClick={() => setNotice('')}>×</button></div>}
@@ -341,4 +354,7 @@ function App() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+const rootStoreKey='__minecraftAiBuilderReactRoot';
+const rootStore=window as Window & { [rootStoreKey]?: ReturnType<typeof createRoot> };
+rootStore[rootStoreKey]??=createRoot(document.getElementById('root')!);
+rootStore[rootStoreKey]!.render(<React.StrictMode><App /></React.StrictMode>);

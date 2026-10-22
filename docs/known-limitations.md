@@ -1,9 +1,9 @@
 # Known limitations
 
-- The viewport renders colored cube placeholders, not Minecraft's block models or textures.
+- The viewport uses approximate shapes for slabs, stairs, snow layers, carpets, and doors. Most blocks remain colored cubes; model selection, Minecraft textures, full state-driven rotations, alpha cutout, connected models, and block-entity renders are not implemented.
 - Only the first region is presented in the current editing interface.
-- The app opens and saves its own JSON project format; it cannot read or write `.schem`, `.schematic`, or `.litematic` files yet.
+- Minecraft schematic support is implemented as described in [minecraft-formats.md](minecraft-formats.md), with block entity/entity/tick/biome data omitted.
 - Block states are represented in the data model, but the palette currently selects only simple default states.
 - Edits are kept in browser memory until the user saves a project file.
-- No browser workflow or performance validation has been recorded for this recovered workspace.
+- Large dense schematics can render slowly; the app has no chunked mesh batching yet.
 - No Starter House with Pink Roof schematic was present in the recovered project files.

@@ -1,0 +1,21 @@
+import { Build, emptyBuild } from '../model';
+import { bytes, compound, encodeRoot, int, num, readRoot, short, validateDimensions, yzx } from './nbt';
+
+const LEGACY:Record<number,string>={0:'air',1:'stone',2:'grass_block',3:'dirt',4:'cobblestone',5:'oak_planks',6:'oak_sapling',7:'bedrock',8:'water',9:'water',10:'lava',11:'lava',12:'sand',13:'gravel',14:'gold_ore',15:'iron_ore',16:'coal_ore',17:'oak_log',18:'oak_leaves',19:'sponge',20:'glass',21:'lapis_ore',22:'lapis_block',24:'sandstone',26:'red_bed',35:'white_wool',41:'gold_block',42:'iron_block',45:'bricks',46:'tnt',47:'bookshelf',48:'mossy_cobblestone',49:'obsidian',50:'torch',53:'oak_stairs',54:'chest',57:'diamond_block',58:'crafting_table',60:'farmland',61:'furnace',64:'oak_door',65:'ladder',67:'cobblestone_stairs',73:'redstone_ore',78:'snow',79:'ice',80:'snow_block',82:'clay',85:'oak_fence',87:'netherrack',88:'soul_sand',89:'glowstone',95:'white_stained_glass',98:'stone_bricks',102:'glass_pane',103:'melon',107:'oak_fence_gate',108:'brick_stairs',109:'stone_brick_stairs',112:'nether_bricks',114:'nether_brick_stairs',126:'oak_slab',128:'sandstone_stairs',155:'quartz_block',156:'quartz_stairs',159:'white_terracotta',161:'acacia_leaves',162:'acacia_log',165:'slime_block',172:'terracotta',173:'coal_block',174:'packed_ice',179:'red_sandstone',180:'red_sandstone_stairs',251:'white_concrete',252:'white_concrete_powder'};
+const MODERN:Record<string,number>=Object.fromEntries(Object.entries(LEGACY).map(([id,name])=>[`minecraft:${name}`,Number(id)]));
+function nibble(data:Uint8Array,index:number){const b=data[index>>1]??0;return index&1?b>>4:b&15;}
+export async function importLegacy(input:Uint8Array):Promise<Build>{
+  const root=await readRoot(input), size:[number,number,number]=[num(root.Width,'width'),num(root.Height,'height'),num(root.Length,'length')],volume=validateDimensions(size,1_000_000);
+  if(root.Materials!=='Alpha') throw new Error('Only Alpha-era legacy .schematic files are supported.');
+  const ids=bytes(root.Blocks,'block ids'),meta=bytes(root.Data,'block data');if(ids.length!==volume||meta.length<Math.ceil(volume/2))throw new Error('Legacy block array length does not match dimensions.');
+  const add=root.AddBlocks?bytes(root.AddBlocks,'extended block ids'):undefined; const origin: [number,number,number]=[0,0,0];
+  const build=emptyBuild(size);build.name=typeof root.Name==='string'?root.Name:'Imported Legacy Schematic';build.metadata={sourceFormat:'Legacy Alpha schematic',legacyMaterials:'Alpha',legacyMapping:'Known 1.12-era block IDs are mapped to modern names; unknown ids remain as minecraft:legacy_block_<id>.'};
+  const blocks=build.regions[0].blocks;
+  for(let i=0;i<volume;i++){let id=ids[i];if(add) id|=((i&1)?(add[i>>1]>>4):(add[i>>1]&15))<<8;const dataValue=nibble(meta,i),name=LEGACY[id]??`legacy_block_${id}`;if(id===0)continue;const x=i%size[0],z=Math.floor(i/size[0])%size[2],y=Math.floor(i/(size[0]*size[2]));blocks.set(`${x},${y},${z}`,{id:`minecraft:${name}`,properties:dataValue?{legacy_data:String(dataValue)}:{}});}
+  return build;
+}
+export async function exportLegacy(build:Build):Promise<Uint8Array>{
+  if(build.regions.length!==1)throw new Error('Legacy export supports one region.');const r=build.regions[0],size=r.size,volume=validateDimensions(size,1_000_000);const blockIds=new Uint8Array(volume),data=new Uint8Array(Math.ceil(volume/2));
+  for(const [key,state] of r.blocks){const [x,y,z]=key.split(',').map(Number);const id=MODERN[state.id];if(id===undefined)throw new Error(`Legacy schematic cannot represent ${state.id}; use Sponge or Litematica export.`);if(Object.keys(state.properties).some(k=>k!=='legacy_data'))throw new Error(`Legacy export cannot safely convert the modern block state ${state.id}; use Sponge or Litematica export.`);const i=yzx(x-r.origin[0],y-r.origin[1],z-r.origin[2],size);blockIds[i]=id;const legacyData=Number(state.properties.legacy_data??0)&15;if(i&1)data[i>>1]|=legacyData<<4;else data[i>>1]|=legacyData;}
+  const root={Materials:'Alpha',Width:short(size[0]),Height:short(size[1]),Length:short(size[2]),Blocks:blockIds,Data:data,Entities:[],TileEntities:[]};return encodeRoot('Schematic',root);
+}
