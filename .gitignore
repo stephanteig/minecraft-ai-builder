@@ -13,5 +13,9 @@ data/samples/*
 *.litematic
 *.schem
 *.schematic
+*.jar
+/data/minecraft-assets/
+/data/resource-packs/
+/public/__phase12test/
 .env*
 !.env.example

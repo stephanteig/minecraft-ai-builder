@@ -32,4 +32,10 @@ describe('Minecraft schematic NBT formats',()=>{
   it('round trips representable legacy Alpha block ids and data',async()=>{
     const b=emptyBuild([2,1,1]);b.regions[0].blocks.set('0,0,0',{id:'minecraft:stone',properties:{}});const out=await importLegacy(await exportLegacy(b));expect(out.regions[0].blocks.get('0,0,0')?.id).toBe('minecraft:stone');
   });
+  it('imports legacy Alpha files with the standard Schematic root wrapper',async()=>{
+    const fixture=await encodeRoot('Schematic',{Schematic:{Materials:'Alpha',Width:short(1),Height:short(1),Length:short(1),Blocks:Uint8Array.from([1]),Data:Uint8Array.from([0]),Entities:[],TileEntities:[]}});
+    const out=await importLegacy(fixture);
+    expect(out.regions[0].size).toEqual([1,1,1]);
+    expect(out.regions[0].blocks.get('0,0,0')?.id).toBe('minecraft:stone');
+  });
 });
