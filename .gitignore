@@ -6,6 +6,10 @@ coverage/
 *.tsbuildinfo
 data/samples/*
 !data/samples/.gitkeep
+/data/datasets/minecraft-builds/schematics-metadata.csv
+/data/datasets/minecraft-builds/downloads/
+/data/datasets/minecraft-builds/images/
+/data/datasets/minecraft-builds/processed/
 *.litematic
 *.schem
 *.schematic
