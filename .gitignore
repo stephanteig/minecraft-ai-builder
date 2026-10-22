@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vite/
+coverage/
+.recovery-backup/
+data/samples/*
+!data/samples/.gitkeep
+*.litematic
+*.schem
+*.schematic
+.env*
+!.env.example
