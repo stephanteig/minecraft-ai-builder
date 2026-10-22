@@ -3,6 +3,7 @@ dist/
 .vite/
 coverage/
 .recovery-backup/
+*.tsbuildinfo
 data/samples/*
 !data/samples/.gitkeep
 *.litematic
